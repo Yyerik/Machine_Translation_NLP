@@ -26,7 +26,7 @@ aligned by Ulrich Germann:
   aligned to the word at position j of the English. Notation 
   i?j means they are probably aligned. Positions are 0-indexed.
 
-  # Machine-Translation-Alignments
+# Machine-Translation-Code-Running
 
 The IBM model 1 Expectation Maximization algorithm is implemented in align_ibm_model1 file.
 
