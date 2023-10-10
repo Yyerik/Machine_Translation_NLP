@@ -1,3 +1,4 @@
+# Machine-Translation-File-Description
 There are three python programs here (`-h` for usage):
 
 - `./align_ibm1` ibm1 word alignment words.
@@ -25,7 +26,7 @@ aligned by Ulrich Germann:
   aligned to the word at position j of the English. Notation 
   i?j means they are probably aligned. Positions are 0-indexed.
 
-  # Machine-Translation-HW2
+  # Machine-Translation-Alignments
 
 The IBM model 1 Expectation Maximization algorithm is implemented in align_ibm_model1 file.
 
