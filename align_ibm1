@@ -1,0 +1,75 @@
+#!/usr/bin/env python
+import optparse
+import sys
+from collections import defaultdict
+
+optparser = optparse.OptionParser()
+optparser.add_option("-d", "--data", dest="train", default="data/hansards", help="Data filename prefix (default=data)")
+optparser.add_option("-e", "--english", dest="english", default="e", help="Suffix of English filename (default=e)")
+optparser.add_option("-f", "--french", dest="french", default="f", help="Suffix of French filename (default=f)")
+optparser.add_option("-t", "--threshold", dest="threshold", default=0.5, type="float", help="Threshold for aligning with Dice's coefficient (default=0.5)")
+optparser.add_option("-n", "--num_sentences", dest="num_sents", default=100000, type="int", help="Number of sentences to use for training and alignment")
+(opts, _) = optparser.parse_args()
+f_data = "%s.%s" % (opts.train, opts.french)
+e_data = "%s.%s" % (opts.train, opts.english)
+
+sys.stderr.write("Training with EM alrorithm...")
+bitext = [[sentence.strip().split() for sentence in pair] for pair in zip(open(f_data), open(e_data))][:opts.num_sents]
+
+# Initial count
+f_count = defaultdict(int)
+e_count = defaultdict(int)
+fe_count = defaultdict(int)
+
+for (n, (f, e)) in enumerate(bitext):
+  for f_i in set(f):
+    for e_j in set(e):
+      #if a_i == e_j 
+      fe_count[(f_i,e_j)] += 1
+      e_count[e_j] += 1
+
+# Initial value of P(f|e)
+pfe = defaultdict(float)
+for pair in fe_count:
+  pfe[pair] = float(fe_count[pair]) / float(e_count[pair[1]])
+
+
+# EM Algorithm
+#pfe = defaultdict(float)
+e_count = defaultdict(int)
+fe_count = defaultdict(int)
+
+
+
+for k in range(5):
+  sys.stderr.write(str(k))
+  e_count = defaultdict(int)
+  fe_count = defaultdict(int)
+  for (n, (f,e)) in enumerate(bitext):
+    for (i, f_i) in enumerate(f):
+      Z = 0
+      for (j, e_j) in enumerate(e):
+        Z += pfe[(f_i, e_j)]
+      for (j, e_j) in enumerate(e):
+        c = pfe[(f_i, e_j)]/Z
+        fe_count[(f_i, e_j)] += c
+        e_count[(e_j)] += c
+  pfe = defaultdict(float)
+
+  for pair in fe_count:
+    pfe[pair] = fe_count[pair] / e_count[pair[1]]
+
+
+
+# alignment
+for (n, (f, e)) in enumerate(bitext):
+  for (i, f_i) in enumerate(f): 
+    best_prob = 0
+    best_j = 0
+    for (j, e_j) in enumerate(e):
+      if pfe[(f_i,e_j)] > best_prob:
+        best_prob = pfe[(f_i,e_j)]
+        best_j = j
+    sys.stdout.write("%i-%i " % (i,best_j))
+  sys.stdout.write("\n")
+  
