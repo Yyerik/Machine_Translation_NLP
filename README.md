@@ -1,6 +1,8 @@
 There are three python programs here (`-h` for usage):
 
-- `./align` aligns words.
+- `./align_ibm1` ibm1 word alignment words.
+
+- `./align_ibm2` ibm2 word alignment words.
 
 - `./check-alignments` checks that the entire dataset is aligned, and
   that there are no out-of-bounds alignment points.
