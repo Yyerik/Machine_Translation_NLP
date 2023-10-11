@@ -1,0 +1,134 @@
+#!/usr/bin/env python
+import optparse
+import sys
+import models
+from collections import namedtuple
+from operator import itemgetter
+from itertools import groupby
+import time
+
+optparser = optparse.OptionParser()
+optparser.add_option("-i", "--input", dest="input", default="data/input", help="File containing sentences to translate (default=data/input)")
+optparser.add_option("-t", "--translation-model", dest="tm", default="data/tm", help="File containing translation model (default=data/tm)")
+optparser.add_option("-l", "--language-model", dest="lm", default="data/lm", help="File containing ARPA-format language model (default=data/lm)")
+optparser.add_option("-n", "--num_sentences", dest="num_sents", default=sys.maxsize, type="int", help="Number of sentences to decode (default=no limit)")
+optparser.add_option("-k", "--translations-per-phrase", dest="k", default=10, type="int", help="Limit on number of translations to consider per phrase (default=1)")
+optparser.add_option("-s", "--stack-size", dest="s", default=100, type="int", help="Maximum stack size (default=1)")
+optparser.add_option("-v", "--verbose", dest="verbose", action="store_true", default=False,  help="Verbose mode (default=off)")
+
+opts = optparser.parse_args()[0]
+
+tm = models.TM(opts.tm, opts.k)
+lm = models.LM(opts.lm)
+french = [tuple(line.strip().split()) for line in open(opts.input).readlines()[:opts.num_sents]]
+
+# tm should translate unknown words as-is with probability 1
+for word in set(sum(french,())):
+  if (word,) not in tm:
+    tm[(word,)] = [models.phrase(word, 0.0)]
+
+def initial_cost(sentence,tm,lm):
+  cost = {}
+  for l in range(1, len(sentence)):
+    for start in range(len(sentence) + 1 - l):
+      end = start + l
+      cost[(start, end)] = float('-inf')
+      if sentence[start:end] in tm:
+        for phrase in tm[sentence[start:end]]:
+          temp_cost = phrase.logprob
+          lm_state = ()
+          for word in phrase.english.split():
+            (lm_state, word_logprob) = lm.score(lm_state, word)
+            temp_cost += word_logprob
+          if temp_cost > cost[(start, end)]:
+            cost[(start, end)] = temp_cost
+      for i in range(start + 1, end):
+        if cost[(start, i)] + cost[(i, end)] > cost[(start, end)]:
+          cost[(start, end)] = cost[(start, i)] + cost[(i, end)]
+  return cost
+
+
+sys.stderr.write("Decoding %s...\n" % (opts.input,))
+# print(time.ctime(time.time()))
+for f in french:
+  # The following code implements a monotone decoding
+  # algorithm (one that doesn't permute the target phrases).
+  # Hence all hypotheses in stacks[i] represent translations of 
+  # the first i words of the input sentence. You should generalize
+  # this so that they can represent translations of *any* i words.
+  hypothesis = namedtuple("hypothesis", "logprob, cost, lm_state, predecessor, phrase, sentence_covered, number")
+  cost = initial_cost(f,tm,lm)
+  initial_hypothesis = hypothesis(0.0, cost[(0, len(f) - 1)], lm.begin(), None, None,
+                                       [0] * len(f), 0)
+  stacks = [{} for _ in f] + [{}]
+  stacks[0][(lm.begin(), tuple([0] * len(f)))] = initial_hypothesis
+
+  best_cost = float('-inf ')
+  best_histogram = [0 for i in range(len(f) + 1)]
+
+  stacks = [{} for _ in f] + [{}]
+  stacks[0][lm.begin()] = initial_hypothesis
+  for i, stack in enumerate(stacks[:-1]):
+    for h in sorted(stack.values(),key=lambda h: -h.logprob - h.cost)[:opts.s]: # prune
+      uncovered_word = [idx for idx, value in enumerate(h.sentence_covered) if value == 0]
+      ranges_index = [list(map(itemgetter(1), dis)) for _, dis in groupby(enumerate(uncovered_word), lambda x: x[0] - x[1])]
+      for r in ranges_index:
+        for j in range(r[0], r[-1]+1):
+          for k in range(j + 1, r[-1] + 2):
+
+
+            if f[j:k] in tm:
+              for phrase in tm[f[j:k]]:
+                logprob = h.logprob + phrase.logprob
+                lm_state = h.lm_state
+                for word in phrase.english.split():
+                  (lm_state, word_logprob) = lm.score(lm_state, word)
+                  logprob += word_logprob
+
+                covered = list(h.sentence_covered)
+                for i in range(j, k):
+                  covered[i] = 1
+                logprob += lm.end(lm_state) if sum(covered) == len(f) else 0.0
+
+
+                new_uncovered_word = [idx for idx, value in enumerate(covered) if value == 0]
+                new_ranges_index = [list(map(itemgetter(1), g)) for f, g in groupby(enumerate(new_uncovered_word), lambda x: x[0] - x[1])]
+                new_future_cost = 0.0
+                for word_group in new_ranges_index:
+                  new_future_cost += cost[(word_group[0], word_group[-1] + 1)]
+                new_hypothesis = hypothesis(logprob, new_future_cost, lm_state, h, phrase, covered, h.number + (k - j))
+
+
+                covered = tuple(covered)
+
+                # prune if worse than first completely expanded hypothesis
+                if logprob + new_future_cost <   best_cost:
+                  continue
+
+                # add hypothesis to stack
+                if (lm_state, covered) not in stacks[h.number + k - j]:
+                  stacks[new_hypothesis.number][(lm_state, covered)] = new_hypothesis
+                  best_histogram[new_hypothesis.number]+=1
+
+                # do recombination if necessary
+                elif stacks[new_hypothesis.number][(lm_state, covered)].logprob < logprob:
+                  stacks[new_hypothesis.number][(lm_state, covered)] = new_hypothesis
+                
+                # A-Star search fully expanded hypothesis
+                if new_hypothesis.number == len(f) and best_cost< logprob + new_future_cost:
+                  best_cost = (logprob + new_future_cost)/0.9
+                  
+                  
+
+  winner = max(stacks[-1].values(), key=lambda h: h.logprob)
+  def extract_english(h):
+    return "" if h.predecessor is None else "%s%s " % (extract_english(h.predecessor), h.phrase.english)
+  print(extract_english(winner))
+
+  if opts.verbose:
+    def extract_tm_logprob(h):
+      return 0.0 if h.predecessor is None else h.phrase.logprob + extract_tm_logprob(h.predecessor)
+    tm_logprob = extract_tm_logprob(winner)
+    sys.stderr.write("LM = %f, TM = %f, Total = %f\n" % 
+      (winner.logprob - tm_logprob, tm_logprob, winner.logprob))
+# print(time.ctime(time.time()))
